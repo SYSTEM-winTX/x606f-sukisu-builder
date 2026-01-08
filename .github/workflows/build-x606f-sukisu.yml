@@ -33,71 +33,56 @@ jobs:
 
       # 4. 【核心】应用SukiSU_patch仓库的4.14内核补丁（从https://github.com/SukiSU-Ultra/SukiSU_patch克隆）
       - name: Apply SukiSU Patch (4.14 Kernel)
-        run: |
-          set -x  # 开启调试模式，输出详细日志（便于排查错误）
-          
-          # 克隆SukiSU_patch仓库（含4.14内核补丁）
-          PATCH_REPO_URL="https://github.com/SukiSU-Ultra/SukiSU_patch.git"
-          PATCH_DIR="patches"  # 克隆到patches目录
-          echo "🔍 Cloning SukiSU_patch repo (4.14 support): $PATCH_REPO_URL"
-          git clone "$PATCH_REPO_URL" "$PATCH_DIR" --depth=1
-          if [ $? -ne 0 ]; then
-            echo "❌ ERROR: Failed to clone SukiSU_patch repo. Check URL/network."
-            exit 1
-          fi
-          echo "✅ SukiSU_patch repo cloned to $PWD/$PATCH_DIR"
+  run: |
+    set -x  # 开启调试模式，输出所有命令及参数（便于排查）
+    
+    # 1. 克隆SukiSU_patch仓库（含4.14内核补丁）
+    PATCH_REPO_URL="https://github.com/SukiSU-Ultra/SukiSU_patch.git"
+    PATCH_DIR="patches"  # 克隆到patches目录
+    echo "🔍 Cloning SukiSU_patch repo: $PATCH_REPO_URL"
+    git clone "$PATCH_REPO_URL" "$PATCH_DIR" --depth=1
+    if [ $? -ne 0 ]; then
+      echo "❌ ERROR: Failed to clone SukiSU_patch repo. Check URL/network."
+      exit 1
+    fi
+    echo "✅ SukiSU_patch repo cloned to $PWD/$PATCH_DIR"
 
-          # 进入内核源码目录（kernel-source，你的目标仓库）
-          cd kernel-source || { echo "❌ ERROR: kernel-source directory not found!"; exit 1; }
-          echo "✅ Entered kernel source directory: $PWD"
+    # 2. 进入内核源码目录（kernel-source，你的目标仓库）
+    cd kernel-source || { echo "❌ ERROR: kernel-source directory not found!"; exit 1; }
+    echo "✅ Entered kernel source directory: $PWD"
 
-          # --------------------------
-          # 【关键】选择4.14内核的补丁文件（根据仓库结构调整路径）
-          # 仓库结构参考：https://github.com/SukiSU-Ultra/SukiSU_patch
-          # 假设4.14补丁在 hooks/ 目录下，文件名含 "4.14"（需根据实际仓库确认）
-          # --------------------------
-          # 示例补丁路径（请根据仓库实际文件调整！）：
-          # 若仓库有4.14专用目录：PATCH_FILE="4.14/sukisu-ultra-4.14.patch"
-          # 若hooks目录按版本分类：PATCH_FILE="hooks/ksu_hooks_sukisu_4.14.patch"
-          PATCH_FILE="hooks/ksu_hooks_sukisu_4.14.patch"  # 优先尝试此路径（常见命名）
-          PATCH_PATH="../$PATCH_DIR/$PATCH_FILE"  # 相对路径：从kernel-source到补丁文件
+    # --------------------------
+    # 【关键修正】4.14内核补丁路径（根据仓库结构：4.14/sukisu-ultra-4.14.patch）
+    # --------------------------
+    PATCH_FILE="4.14/sukisu-ultra-4.14.patch"  # 实际路径：仓库的4.14子目录下的补丁文件
+    PATCH_PATH="../$PATCH_DIR/$PATCH_FILE"  # 相对路径：从kernel-source到补丁文件（../patches/4.14/sukisu-ultra-4.14.patch）
+    echo "🔍 Target patch path: $PATCH_PATH"
 
-          # 检查补丁文件是否存在（若路径错误，列出patches目录供调试）
-          if [ ! -f "$PATCH_PATH" ]; then
-            echo "⚠️ Warning: Patch file not found at $PATCH_PATH. Searching alternatives..."
-            echo "🔍 Available files in $PATCH_DIR/:"
-            ls -la "$PATCH_DIR"  # 列出补丁仓库根目录文件
-            echo "🔍 Available files in $PATCH_DIR/hooks/:"
-            ls -la "$PATCH_DIR/hooks/"  # 列出hooks目录（补丁可能在此）
-            
-            # 尝试模糊匹配4.14相关补丁（自动查找含"4.14"的.patch文件）
-            ALTERNATIVE_PATCH=$(find "$PATCH_DIR" -name "*4.14*.patch" | head -n 1)
-            if [ -n "$ALTERNATIVE_PATCH" ]; then
-              PATCH_PATH="$ALTERNATIVE_PATCH"
-              echo "✅ Found alternative patch: $PATCH_PATH"
-            else
-              echo "❌ ERROR: No 4.14 kernel patch found in SukiSU_patch repo!"
-              echo "Please check the repo structure and update PATCH_FILE path manually."
-              exit 1
-            fi
-          fi
+    # 3. 检查补丁文件是否存在（若路径错误，列出目录供调试）
+    if [ ! -f "$PATCH_PATH" ]; then
+      echo "❌ ERROR: Patch file not found at $PATCH_PATH"
+      echo "🔍 Available files in $PATCH_DIR/:"
+      ls -la "$PATCH_DIR"  # 列出补丁仓库根目录文件（应有4.14/目录）
+      echo "🔍 Available files in $PATCH_DIR/4.14/:"
+      ls -la "$PATCH_DIR/4.14/"  # 列出4.14目录（确认sukisu-ultra-4.14.patch存在）
+      exit 1
+    fi
+    echo "✅ Found 4.14 kernel patch: $PATCH_PATH"
 
-          # 应用补丁（优先用git apply，失败则用git am）
-          echo "🔧 Applying 4.14 kernel patch: $PATCH_PATH"
-          if git apply "$PATCH_PATH"; then
-            echo "✅ Patch applied successfully with git apply"
-          else
-            echo "⚠️ git apply failed (可能存在冲突), trying git am (with commit info)..."
-            git am "$PATCH_PATH"  # 若补丁含提交信息，用git am更可靠
-            if [ $? -ne 0 ]; then
-              echo "⚠️ Patch application failed. Generating .rej file for conflict analysis..."
-              git apply --reject "$PATCH_PATH"  # 生成.rej文件显示冲突部分
-              echo "⚠️ Check *.rej files in kernel-source/ for manual conflict resolution"
-              # 若需严格应用补丁，取消下一行注释：exit 1；否则继续编译
-              # exit 1
-            fi
-          fi
-          echo "✅ Patch processing completed (conflicts noted in .rej files if any)"
+    # 4. 应用补丁（优先用git am，失败则用git apply --reject）
+    echo "🔧 Applying 4.14 kernel patch..."
+    if git am "$PATCH_PATH"; then
+      echo "✅ Patch applied successfully with git am"
+    elif git apply "$PATCH_PATH"; then
+      echo "✅ Patch applied successfully with git apply"
+    else
+      echo "⚠️ Patch application failed (可能存在冲突). Generating .rej file for analysis..."
+      git apply --reject "$PATCH_PATH"  # 生成.rej文件显示冲突部分
+      echo "⚠️ Check *.rej files in kernel-source/ for manual conflict resolution"
+      # 若需严格应用补丁，取消下一行注释：exit 1；否则继续编译
+      # exit 1
+    fi
+    echo "✅ Patch processing completed"
 
       # 5. 设置内核根目录（KDIR）为目标仓库（kernel-source）
       - name: Set Kernel Root Directory (KDIR)
