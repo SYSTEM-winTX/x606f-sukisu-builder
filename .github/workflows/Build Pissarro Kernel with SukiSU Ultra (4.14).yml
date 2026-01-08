@@ -41,18 +41,19 @@ jobs:
           # --------------------------
           PATCH_REPO_URL="https://github.com/SukiSU-Ultra/SukiSU_patch.git"
           PATCH_DIR="patches"
-          rm -rf "$PATCH_DIR"  # 删除旧仓库（避免残留文件干扰）
+          rm -rf "$PATCH_DIR"
           git clone --depth=1 "$PATCH_REPO_URL" "$PATCH_DIR" || { 
             echo "❌ 克隆失败！请检查网络或仓库可用性"
             exit 1
           }
 
           # --------------------------
-          # 2. 验证补丁文件存在
+          # 2. 验证补丁文件存在（关键修正！）
           # --------------------------
-          PATCH_FILE="4.14/ksu_hooks_4.14.patch"
+          PATCH_FILE="ksu_hooks_4.14.patch"  # 直接位于仓库根目录
           if [ ! -f "$PATCH_DIR/$PATCH_FILE" ]; then
             echo "❌ 错误：补丁文件不存在！"
+            ls -la "$PATCH_DIR"  # 列出仓库实际文件
             exit 1
           fi
 
@@ -86,13 +87,13 @@ jobs:
               
               # 自动尝试修复简单冲突（保留补丁内容）
               for rej_file in $REJ_FILES; do
-                PATCH_FILE=$(dirname $rej_file)/$(basename $rej_file .rej).patch
-                if [ -f "$PATCH_FILE" ]; then
-                  echo "🛠️ 修复冲突：$PATCH_FILE"
-                  sed -i '/^<<<<<<< /d' "$PATCH_FILE"  # 移除冲突标记
-                  sed -i '/^=======$/d' "$PATCH_FILE"
-                  sed -i '/^>>>>>>> /d' "$PATCH_FILE"
-                  git apply --whitespace=fix "$PATCH_FILE"
+                PATCH_FILE_CLEAN=$(dirname $rej_file)/$(basename $rej_file .rej).patch
+                if [ -f "$PATCH_FILE_CLEAN" ]; then
+                  echo "🛠️ 修复冲突：$PATCH_FILE_CLEAN"
+                  sed -i '/^<<<<<<< /d' "$PATCH_FILE_CLEAN"
+                  sed -i '/^=======$/d' "$PATCH_FILE_CLEAN"
+                  sed -i '/^>>>>>>> /d' "$PATCH_FILE_CLEAN"
+                  git apply --whitespace=fix "$PATCH_FILE_CLEAN"
                 fi
               done
             
