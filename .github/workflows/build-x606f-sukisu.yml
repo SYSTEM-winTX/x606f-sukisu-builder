@@ -31,58 +31,76 @@ jobs:
             gcc-aarch64-linux-gnu g++-aarch64-linux-gnu patch libelf-dev libncurses5-dev
           echo "✅ Build environment ready"
 
-      # 4. 【核心修正】应用SukiSU_patch仓库的4.14内核补丁（路径已适配仓库结构）
+      # 4. 【最终修正】应用SukiSU_patch仓库的4.14内核补丁（路径：仓库根目录/4.14/ksu_hooks_4.14.patch）
       - name: Apply SukiSU Patch (4.14 Kernel)
         run: |
           set -x  # 开启调试模式，输出所有命令及参数（便于排查）
           
-          # 克隆SukiSU_patch仓库（含4.14内核补丁）
-          PATCH_REPO_URL="https://github.com/SukiSU-Ultra/SukiSU_patch.git"
-          PATCH_DIR="patches"  # 克隆到patches目录
-          echo "🔍 Cloning SukiSU_patch repo: $PATCH_REPO_URL"
-          git clone "$PATCH_REPO_URL" "$PATCH_DIR" --depth=1
-          if [ $? -ne 0 ]; then
-            echo "❌ ERROR: Failed to clone SukiSU_patch repo. Check URL/network."
-            exit 1
-          fi
-          echo "✅ SukiSU_patch repo cloned to $PWD/$PATCH_DIR"
-
-          # 进入内核源码目录（kernel-source，你的目标仓库）
-          cd kernel-source || { echo "❌ ERROR: kernel-source directory not found!"; exit 1; }
-          echo "✅ Entered kernel source directory: $PWD"
-
           # --------------------------
-          # 【关键修正】4.14内核补丁路径（根据仓库结构：4.14/sukisu-ultra-4.14.patch）
+          # 1. 强制克隆SukiSU_patch仓库（确保成功）
           # --------------------------
-          PATCH_FILE="4.14/sukisu-ultra-4.14.patch"  # 实际路径：仓库的4.14子目录下的补丁文件
-          PATCH_PATH="../$PATCH_DIR/$PATCH_FILE"  # 相对路径：从kernel-source到补丁文件（../patches/4.14/sukisu-ultra-4.14.patch）
-          echo "🔍 Target patch path: $PATCH_PATH"
-
-          # 检查补丁文件是否存在（若路径错误，列出目录供调试）
-          if [ ! -f "$PATCH_PATH" ]; then
-            echo "❌ ERROR: Patch file not found at $PATCH_PATH"
-            echo "🔍 Available files in $PATCH_DIR/:"
-            ls -la "$PATCH_DIR"  # 列出补丁仓库根目录文件（应有4.14/目录）
-            echo "🔍 Available files in $PATCH_DIR/4.14/:"
-            ls -la "$PATCH_DIR/4.14/"  # 列出4.14目录（确认sukisu-ultra-4.14.patch存在）
-            exit 1
-          fi
-          echo "✅ Found 4.14 kernel patch: $PATCH_PATH"
-
-          # 应用补丁（优先用git am，失败则用git apply --reject）
-          echo "🔧 Applying 4.14 kernel patch..."
-          if git am "$PATCH_PATH"; then
-            echo "✅ Patch applied successfully with git am"
-          elif git apply "$PATCH_PATH"; then
-            echo "✅ Patch applied successfully with git apply"
+          PATCH_REPO_URL="https://github.com/SukiSU-Ultra/SukiSU_patch.git"  # 官方地址
+          PATCH_DIR="patches"  # 克隆到当前目录的patches文件夹
+          echo "🔍 Cloning SukiSU_patch repo (目标路径：$PATCH_DIR/4.14/ksu_hooks_4.14.patch)..."
+          
+          # 步骤1：删除残留的patches目录（避免旧文件干扰）
+          rm -rf "$PATCH_DIR"
+          
+          # 步骤2：克隆仓库（优先官方地址，失败则用代理）
+          if git clone --depth=1 "$PATCH_REPO_URL" "$PATCH_DIR"; then
+            echo "✅ 官方地址克隆成功"
           else
-            echo "⚠️ Patch application failed (可能存在冲突). Generating .rej file for analysis..."
-            git apply --reject "$PATCH_PATH"  # 生成.rej文件显示冲突部分
-            echo "⚠️ Check *.rej files in kernel-source/ for manual conflict resolution"
-            # 若需严格应用补丁，取消下一行注释：exit 1；否则继续编译
+            echo "⚠️ 官方地址失败，尝试代理地址..."
+            if git clone --depth=1 "https://ghproxy.com/$PATCH_REPO_URL" "$PATCH_DIR"; then
+              echo "✅ 代理地址克隆成功"
+            else
+              echo "❌ 克隆失败！请手动检查："
+              echo "1. 仓库是否存在：https://github.com/SukiSU-Ultra/SukiSU_patch"
+              echo "2. 网络是否能访问GitHub（可尝试在Actions日志中ping github.com）"
+              exit 1
+            fi
+          fi
+
+          # 步骤3：验证克隆结果（必须存在4.14目录和补丁文件）
+          if [ ! -d "$PATCH_DIR/4.14" ]; then
+            echo "❌ 错误：$PATCH_DIR/4.14目录不存在！仓库结构可能已变更。"
+            echo "🔍 仓库实际结构："
+            ls -la "$PATCH_DIR"  # 列出克隆后的文件
+            exit 1
+          fi
+          if [ ! -f "$PATCH_DIR/4.14/ksu_hooks_4.14.patch" ]; then
+            echo "❌ 错误：补丁文件$PATCH_DIR/4.14/ksu_hooks_4.14.patch不存在！"
+            echo "🔍 4.14目录内容："
+            ls -la "$PATCH_DIR/4.14"  # 列出4.14目录文件
+            exit 1
+          fi
+          echo "✅ 确认补丁文件存在：$PATCH_DIR/4.14/ksu_hooks_4.14.patch"
+
+          # --------------------------
+          # 2. 进入内核源码目录（kernel-source）
+          # --------------------------
+          cd kernel-source || { echo "❌ 错误：kernel-source目录不存在！"; exit 1; }
+          echo "✅ 进入内核源码目录：$PWD"
+
+          # --------------------------
+          # 3. 应用补丁（路径100%匹配你的描述）
+          # --------------------------
+          PATCH_PATH="../$PATCH_DIR/4.14/ksu_hooks_4.14.patch"  # 相对路径：从kernel-source到补丁文件
+          echo "🔧 应用补丁：$PATCH_PATH"
+          
+          # 应用补丁（优先用git am，失败则用git apply --reject）
+          if git am "$PATCH_PATH"; then
+            echo "✅ 补丁应用成功（git am）"
+          elif git apply "$PATCH_PATH"; then
+            echo "✅ 补丁应用成功（git apply）"
+          else
+            echo "⚠️ 补丁应用失败（可能存在冲突），生成.rej文件供分析..."
+            git apply --reject "$PATCH_PATH"  # 生成.rej文件显示冲突位置
+            echo "⚠️ 请查看内核源码目录中的*.rej文件，手动解决冲突后重试"
+            # 若需强制继续编译，注释下一行；否则取消注释exit 1
             # exit 1
           fi
-          echo "✅ Patch processing completed"
+          echo "✅ 补丁处理完成"
 
       # 5. 设置内核根目录（KDIR）为目标仓库（kernel-source）
       - name: Set Kernel Root Directory (KDIR)
@@ -159,24 +177,25 @@ jobs:
             exit 1
           fi
 
-      # 9. 生成AnyKernel3刷机包（使用SukiSU_patch仓库的AnyKernel3模板，或手动创建）
+      # 9. 【融合AnyKernel3模板】生成刷机包（优先使用SukiSU_patch仓库根目录/AnyKernel3）
       - name: Generate AnyKernel3 Flashable ZIP
         run: |
-          # 方案1：使用SukiSU_patch仓库的AnyKernel3模板（若仓库有此目录）
-          PATCH_ANYKERNEL_DIR="../patches/AnyKernel3"  # 补丁仓库中的AnyKernel3目录
+          # 方案1：使用SukiSU_patch仓库的AnyKernel3模板（仓库根目录/AnyKernel3）
+          # 注：patches目录是克隆SukiSU_patch仓库后的目录，故路径为../patches/AnyKernel3
+          PATCH_ANYKERNEL_DIR="../patches/AnyKernel3"
           if [ -d "$PATCH_ANYKERNEL_DIR" ]; then
-            echo "✅ Using AnyKernel3 template from SukiSU_patch repo"
+            echo "✅ 使用SukiSU_patch仓库的AnyKernel3模板（路径：$PATCH_ANYKERNEL_DIR）"
             cp -r "$PATCH_ANYKERNEL_DIR" anykernel3  # 复制到工作流目录
           else
-            # 方案2：手动克隆AnyKernel3模板（备用）
-            echo "⚠️ SukiSU_patch AnyKernel3 not found, cloning default template"
+            # 方案2：若模板不存在，手动克隆默认AnyKernel3（备用）
+            echo "⚠️ SukiSU_patch仓库未找到AnyKernel3模板，克隆默认模板"
             git clone https://ghproxy.com/https://github.com/osm0sis/AnyKernel3.git anykernel3 --depth=1
           fi
           
           # 复制内核镜像到AnyKernel3目录
           cp $GITHUB_WORKSPACE/output/kernel.img anykernel3/
           
-          # 修改AnyKernel3设备信息（适配pissarro）
+          # 修改AnyKernel3设备信息（适配pissarro，使用SukiSU_patch模板时可保留其配置，此处统一覆盖）
           cat > anykernel3/anykernel.sh << 'EOF'
           # AnyKernel3 for Pissarro (Redmi Note 11 Pro) - SukiSU Ultra 4.14
           kernel.string=SukiSU Ultra 4.14 for Pissarro
@@ -194,9 +213,9 @@ jobs:
           
           # 打包为刷机ZIP
           cd anykernel3
-          zip -r9 ../SukiSU-Ultra-4.14-pissarro-anykernel3.zip ./* -x ".git/*" "README.md"
+          zip -r9 ../SukiSU-Ultra-4.14-pissarro-anykernel3.zip ./* -x ".git/*" "README.md" "LICENSE"
           cd ..
-          echo "✅ Generated AnyKernel3 ZIP: SukiSU-Ultra-4.14-pissarro-anykernel3.zip"
+          echo "✅ 生成AnyKernel3刷机包：SukiSU-Ultra-4.14-pissarro-anykernel3.zip"
 
       # 10. 上传最终刷机包（供下载）
       - name: Upload Artifact
